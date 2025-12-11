@@ -1,0 +1,136 @@
+{
+  "name": "api-tester",
+  "displayName": "API Tester",
+  "description": "A powerful API testing tool integrated into VS Code with automatic endpoint discovery",
+  "version": "1.0.0",
+  "publisher": "your-name",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Testing",
+    "Other"
+  ],
+  "keywords": [
+    "api",
+    "rest",
+    "http",
+    "postman",
+    "testing",
+    "endpoint",
+    "request"
+  ],
+  "icon": "images/icon.png",
+  "galleryBanner": {
+    "color": "#0a0a0f",
+    "theme": "dark"
+  },
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./dist/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "apiTester.openPanel",
+        "title": "Open API Tester",
+        "category": "API Tester",
+        "icon": "$(zap)"
+      },
+      {
+        "command": "apiTester.discoverEndpoints",
+        "title": "Discover API Endpoints",
+        "category": "API Tester",
+        "icon": "$(search)"
+      },
+      {
+        "command": "apiTester.testFromCursor",
+        "title": "Test API at Cursor",
+        "category": "API Tester",
+        "icon": "$(play)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "apiTester.openPanel",
+        "key": "ctrl+shift+a",
+        "mac": "cmd+shift+a"
+      },
+      {
+        "command": "apiTester.testFromCursor",
+        "key": "ctrl+shift+t",
+        "mac": "cmd+shift+t",
+        "when": "editorTextFocus"
+      }
+    ],
+    "menus": {
+      "editor/context": [
+        {
+          "command": "apiTester.testFromCursor",
+          "group": "navigation",
+          "when": "editorTextFocus"
+        }
+      ],
+      "editor/title": [
+        {
+          "command": "apiTester.openPanel",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "API Tester",
+      "properties": {
+        "apiTester.defaultBaseUrl": {
+          "type": "string",
+          "default": "http://localhost:3000",
+          "description": "Default base URL for discovered endpoints"
+        },
+        "apiTester.timeout": {
+          "type": "number",
+          "default": 30000,
+          "description": "Request timeout in milliseconds"
+        },
+        "apiTester.saveHistory": {
+          "type": "boolean",
+          "default": true,
+          "description": "Save request history"
+        },
+        "apiTester.maxHistoryItems": {
+          "type": "number",
+          "default": 100,
+          "description": "Maximum number of history items to keep"
+        },
+        "apiTester.autoDiscoverOnOpen": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically discover endpoints when opening a workspace"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "lint": "eslint src --ext ts",
+    "pretest": "npm run compile && npm run lint",
+    "test": "node ./out/test/runTest.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.0",
+    "@types/vscode": "^1.85.0",
+    "@typescript-eslint/eslint-plugin": "^6.13.0",
+    "@typescript-eslint/parser": "^6.13.0",
+    "eslint": "^8.54.0",
+    "typescript": "^5.3.2",
+    "@vscode/vsce": "^2.22.0"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/api-tester"
+  },
+  "license": "MIT"
+}
