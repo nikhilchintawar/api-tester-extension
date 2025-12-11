@@ -48,6 +48,12 @@
         "title": "Test API at Cursor",
         "category": "API Tester",
         "icon": "$(play)"
+      },
+      {
+        "command": "apiTester.importOpenAPI",
+        "title": "Import OpenAPI File",
+        "category": "API Tester",
+        "icon": "$(file-code)"
       }
     ],
     "keybindings": [

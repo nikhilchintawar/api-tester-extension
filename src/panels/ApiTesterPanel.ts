@@ -68,13 +68,6 @@ export class ApiTesterPanel {
             case 'deleteRequest':
                 await this._deleteRequest(message.id as string);
                 break;
-            case 'getHistory':
-                await this._getHistory();
-                break;
-            case 'clearHistory':
-                await this._services.requestHistory.clearHistory();
-                this.postMessage({ type: 'historyCleared' });
-                break;
             case 'getEnvironments':
                 await this._getEnvironments();
                 break;
@@ -86,6 +79,12 @@ export class ApiTesterPanel {
                 break;
             case 'openFile':
                 await this._openFile(message.file as string, message.line as number);
+                break;
+            case 'exportOpenAPI':
+                await this._exportOpenAPI();
+                break;
+            case 'importOpenAPI':
+                await this._importOpenAPI(message.json as string);
                 break;
         }
     }
@@ -148,15 +147,9 @@ export class ApiTesterPanel {
 
             const responseSize = new TextEncoder().encode(responseBody).length;
 
-            await this._services.requestHistory.addToHistory({
-                request: { method, url, headers, body, bodyType: 'json' },
-                response: { status: response.status, statusText: response.statusText, headers: responseHeaders, body: responseBody, time: responseTime, size: responseSize },
-            });
-
             this.postMessage({ type: 'response', status: response.status, statusText: response.statusText, headers: responseHeaders, body: responseBody, time: responseTime, size: responseSize });
         } catch (error) {
             const responseTime = Date.now() - startTime;
-            await this._services.requestHistory.addToHistory({ request: { method, url, headers, body, bodyType: 'json' } });
             this.postMessage({ type: 'error', message: error instanceof Error ? error.message : 'Request failed', time: responseTime });
         }
     }
@@ -216,11 +209,6 @@ export class ApiTesterPanel {
         await this._getSavedRequests();
     }
 
-    private async _getHistory(): Promise<void> {
-        const history = await this._services.requestHistory.getHistory();
-        this.postMessage({ type: 'history', history });
-    }
-
     private async _getEnvironments(): Promise<void> {
         const environments = await this._services.environmentManager.getEnvironments();
         this.postMessage({ type: 'environments', environments });
@@ -245,6 +233,50 @@ export class ApiTesterPanel {
             editor.revealRange(new vscode.Range(position, position), vscode.TextEditorRevealType.InCenter);
         } catch (error) {
             vscode.window.showErrorMessage(`Could not open file: ${file}`);
+        }
+    }
+
+    private async _exportOpenAPI(): Promise<void> {
+        try {
+            console.log('[API Tester] Starting OpenAPI export...');
+            const openapi = await this._services.requestHistory.exportAsOpenAPI('My API Collection');
+            console.log('[API Tester] Got OpenAPI JSON, length:', openapi.length);
+
+            // Save to file
+            const uri = await vscode.window.showSaveDialog({
+                defaultUri: vscode.Uri.file('openapi.json'),
+                filters: { 'OpenAPI': ['json'] }
+            });
+
+            console.log('[API Tester] Save dialog result:', uri?.fsPath || 'cancelled');
+
+            if (uri) {
+                await vscode.workspace.fs.writeFile(uri, Buffer.from(openapi, 'utf8'));
+                vscode.window.showInformationMessage(`OpenAPI exported to ${uri.fsPath}`);
+                console.log('[API Tester] Export successful!');
+            } else {
+                console.log('[API Tester] Export cancelled by user');
+            }
+        } catch (error) {
+            console.error('[API Tester] Export error:', error);
+            vscode.window.showErrorMessage(`Failed to export OpenAPI: ${error}`);
+        }
+    }
+
+    private async _importOpenAPI(json: string): Promise<void> {
+        try {
+            const result = await this._services.requestHistory.importFromOpenAPI(json);
+
+            if (result.errors.length > 0) {
+                vscode.window.showWarningMessage(`Imported ${result.imported} requests with ${result.errors.length} errors`);
+            } else {
+                vscode.window.showInformationMessage(`Successfully imported ${result.imported} requests`);
+            }
+
+            // Refresh saved requests
+            await this._getSavedRequests();
+        } catch (error) {
+            vscode.window.showErrorMessage(`Failed to import OpenAPI: ${error}`);
         }
     }
 
@@ -416,7 +448,7 @@ export class ApiTesterPanel {
         let state = {
             method: 'GET', url: '', headers: [{ key: '', value: '' }], queryParams: [{ key: '', value: '' }], body: '', bodyType: 'json',
             auth: { type: 'none' }, activeTab: 'params', responseTab: 'body', sidebarTab: 'discovered',
-            response: null, loading: false, discoveredEndpoints: [], savedRequests: [], history: [], environments: []
+            response: null, loading: false, discoveredEndpoints: [], savedRequests: [], environments: []
         };
 
         const icons = {
@@ -440,7 +472,6 @@ export class ApiTesterPanel {
                     <div class="sidebar-tabs">
                         <button class="sidebar-tab \${state.sidebarTab === 'discovered' ? 'active' : ''}" onclick="setSidebarTab('discovered')">Discovered</button>
                         <button class="sidebar-tab \${state.sidebarTab === 'saved' ? 'active' : ''}" onclick="setSidebarTab('saved')">Saved</button>
-                        <button class="sidebar-tab \${state.sidebarTab === 'history' ? 'active' : ''}" onclick="setSidebarTab('history')">History</button>
                     </div>
                     <div class="sidebar-content">\${renderSidebarContent()}</div>
                 </div>
@@ -475,12 +506,16 @@ export class ApiTesterPanel {
                 return Object.entries(grouped).map(([fw, eps]) => \`<div class="sidebar-section"><div class="sidebar-section-header">\${fw} <span>\${eps.length}</span></div>\${eps.map(ep => \`<div class="request-item" onclick='loadEndpoint(\${JSON.stringify(ep)})'><span class="method-badge \${ep.method.toLowerCase()}">\${ep.method}</span><span class="request-path">\${ep.path}</span></div>\`).join('')}</div>\`).join('');
             }
             if (state.sidebarTab === 'saved') {
-                if (state.savedRequests.length === 0) return \`<div class="empty-state"><div class="empty-state-icon">\${icons.folder}</div><h3>No Saved Requests</h3><p>Save requests to access them quickly.</p></div>\`;
-                return state.savedRequests.map(req => \`<div class="request-item" onclick="loadSavedRequest('\${req.id}')"><span class="method-badge \${req.method.toLowerCase()}">\${req.method}</span><span class="request-path">\${req.name || req.url}</span><button class="remove-btn" onclick="event.stopPropagation();deleteRequest('\${req.id}')">\${icons.trash}</button></div>\`).join('');
-            }
-            if (state.sidebarTab === 'history') {
-                if (state.history.length === 0) return \`<div class="empty-state"><div class="empty-state-icon">\${icons.clock}</div><h3>No History</h3><p>Your requests will appear here.</p></div>\`;
-                return \`<div class="sidebar-section"><div class="sidebar-section-header">Recent <button class="action-btn" onclick="clearHistory()">Clear</button></div>\${state.history.slice(0,20).map(e => \`<div class="request-item" onclick="loadFromHistory('\${e.id}')"><span class="method-badge \${e.request.method.toLowerCase()}">\${e.request.method}</span><span class="request-path">\${truncateUrl(e.request.url)}</span>\${e.response ? \`<span class="status-badge \${getStatusClass(e.response.status)}">\${e.response.status}</span>\` : ''}</div>\`).join('')}</div>\`;
+                const openAPIButtons = \`
+                    <div style="display:flex;gap:8px;padding:8px 12px;border-bottom:1px solid var(--border-color)">
+                        <button class="action-btn" onclick="exportOpenAPI()" style="flex:1;font-size:11px">Export OpenAPI</button>
+                        <button class="action-btn" onclick="importOpenAPI()" style="flex:1;font-size:11px">Import OpenAPI</button>
+                    </div>
+                \`;
+                if (state.savedRequests.length === 0) {
+                    return openAPIButtons + \`<div class="empty-state"><div class="empty-state-icon">\${icons.folder}</div><h3>No Saved Requests</h3><p>Save requests or import OpenAPI spec.</p></div>\`;
+                }
+                return openAPIButtons + state.savedRequests.map(req => \`<div class="request-item" onclick="loadSavedRequest('\${req.id}')"><span class="method-badge \${req.method.toLowerCase()}">\${req.method}</span><span class="request-path">\${req.name || req.url}</span><button class="remove-btn" onclick="event.stopPropagation();deleteRequest('\${req.id}')">\${icons.trash}</button></div>\`).join('');
             }
             return '';
         }
@@ -528,7 +563,7 @@ export class ApiTesterPanel {
         function setUrl(u){state.url=u;}
         function setActiveTab(t){state.activeTab=t;render();}
         function setResponseTab(t){state.responseTab=t;render();}
-        function setSidebarTab(t){state.sidebarTab=t;render();if(t==='saved')vscode.postMessage({type:'getSavedRequests'});if(t==='history')vscode.postMessage({type:'getHistory'});}
+        function setSidebarTab(t){state.sidebarTab=t;render();if(t==='saved')vscode.postMessage({type:'getSavedRequests'});}
         function setBodyType(t){state.bodyType=t;if(t==='json'&&!state.headers.some(h=>h.key.toLowerCase()==='content-type'))state.headers.push({key:'Content-Type',value:'application/json'});render();}
         function setBody(b){state.body=b;}
         function setAuthType(t){state.auth={type:t};render();}
@@ -624,7 +659,6 @@ export class ApiTesterPanel {
                 render();
             }
         }
-        function loadFromHistory(id){const e=state.history.find(x=>x.id===id);if(e){state.method=e.request.method;state.url=e.request.url;state.headers=Object.entries(e.request.headers||{}).map(([k,v])=>({key:k,value:v}));if(!state.headers.length)state.headers.push({key:'',value:''});state.body=e.request.body||'';state.bodyType=e.request.bodyType||'json';render();}}
         function saveCurrentRequest(){
             console.log('[Webview] Save button clicked');
             console.log('[Webview] Current state.response:', state.response);
@@ -685,11 +719,25 @@ export class ApiTesterPanel {
             vscode.postMessage(payload);
         }
         function deleteRequest(id){vscode.postMessage({type:'deleteRequest',id});}
-        function clearHistory(){vscode.postMessage({type:'clearHistory'});}
         function createEnvironment(){
             // For now, create with default name - we can improve this later with a proper UI
             const defaultName = 'Environment ' + (state.environments.length + 1);
             vscode.postMessage({type:'createEnvironment',name:defaultName,variables:{}});
+        }
+
+        function exportOpenAPI(){
+            console.log('[Webview] Exporting OpenAPI...');
+            vscode.postMessage({type:'exportOpenAPI'});
+        }
+
+        function importOpenAPI(){
+            console.log('[Webview] Importing OpenAPI...');
+            // For now, we need the user to paste JSON
+            // In a real implementation, this would open a file picker
+            const json = prompt('Paste your OpenAPI JSON here:');
+            if(json){
+                vscode.postMessage({type:'importOpenAPI',json});
+            }
         }
 
         window.addEventListener('message',e=>{
@@ -713,8 +761,6 @@ export class ApiTesterPanel {
                     vscode.postMessage({type:'getSavedRequests'});
                     state.sidebarTab='saved';
                     break;
-                case'history':state.history=m.history||[];render();break;
-                case'historyCleared':state.history=[];render();break;
                 case'environments':state.environments=m.environments||[];render();break;
             }
         });
@@ -728,10 +774,8 @@ export class ApiTesterPanel {
         window.sendRequest = sendRequest;
         window.discoverEndpoints = discoverEndpoints;
         window.loadSavedRequest = loadSavedRequest;
-        window.loadFromHistory = loadFromHistory;
         window.loadEndpoint = loadEndpoint;
         window.deleteRequest = deleteRequest;
-        window.clearHistory = clearHistory;
         window.createEnvironment = createEnvironment;
         window.setMethod = setMethod;
         window.setUrl = setUrl;
@@ -743,6 +787,8 @@ export class ApiTesterPanel {
         window.setAuthType = setAuthType;
         window.setAuthField = setAuthField;
         window.setEnvironment = setEnvironment;
+        window.exportOpenAPI = exportOpenAPI;
+        window.importOpenAPI = importOpenAPI;
 
         console.log('[Webview] Initializing - Version 1.0.4');
         console.log('[Webview] addKeyValue function exists:', typeof window.addKeyValue);
