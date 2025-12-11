@@ -176,10 +176,13 @@ export class ApiTesterPanel {
     }
 
     private async _saveRequest(message: { [key: string]: unknown }): Promise<void> {
-        console.log('[API Tester] Saving request with message:', message);
-        console.log('[API Tester] Response in message:', message.response);
+        console.log('[API Tester] ===== SAVE REQUEST START =====');
+        console.log('[API Tester] Full message:', JSON.stringify(message, null, 2));
+        console.log('[API Tester] Response field exists?', 'response' in message);
+        console.log('[API Tester] Response value:', message.response);
+        console.log('[API Tester] Response type:', typeof message.response);
 
-        const request = await this._services.requestHistory.saveRequest({
+        const requestToSave = {
             name: message.name as string,
             method: message.method as string,
             url: message.url as string,
@@ -188,9 +191,17 @@ export class ApiTesterPanel {
             bodyType: (message.bodyType as 'none' | 'json' | 'form' | 'text' | 'xml') || 'json',
             auth: message.auth as any,
             response: message.response as any,
-        });
-        console.log('[API Tester] Request saved successfully:', request);
-        console.log('[API Tester] Saved request has response:', request.response);
+        };
+
+        console.log('[API Tester] About to save with response:', requestToSave.response);
+
+        const request = await this._services.requestHistory.saveRequest(requestToSave);
+
+        console.log('[API Tester] Request saved successfully!');
+        console.log('[API Tester] Saved request response field:', request.response);
+        console.log('[API Tester] Saved request has response?', !!request.response);
+        console.log('[API Tester] ===== SAVE REQUEST END =====');
+
         this.postMessage({ type: 'requestSaved', request });
     }
 
@@ -314,10 +325,6 @@ export class ApiTesterPanel {
         
         .main-content { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
         
-        .env-selector { display: flex; align-items: center; gap: 12px; padding: 12px 20px; background: var(--bg-tertiary); border-bottom: 1px solid var(--border-color); }
-        .env-selector label { font-size: 11px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; }
-        .env-selector select { padding: 8px 12px; font-size: 12px; background: var(--bg-primary); border: 1px solid var(--border-color); border-radius: 8px; color: var(--text-primary); cursor: pointer; }
-        
         .request-builder { padding: 20px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary); }
         .url-bar { display: flex; gap: 10px; margin-bottom: 16px; }
         
@@ -407,7 +414,7 @@ export class ApiTesterPanel {
         const vscode = acquireVsCodeApi();
         
         let state = {
-            method: 'GET', url: '', headers: [{ key: '', value: '' }], body: '', bodyType: 'json',
+            method: 'GET', url: '', headers: [{ key: '', value: '' }], queryParams: [{ key: '', value: '' }], body: '', bodyType: 'json',
             auth: { type: 'none' }, activeTab: 'params', responseTab: 'body', sidebarTab: 'discovered',
             response: null, loading: false, discoveredEndpoints: [], savedRequests: [], history: [], environments: []
         };
@@ -438,13 +445,6 @@ export class ApiTesterPanel {
                     <div class="sidebar-content">\${renderSidebarContent()}</div>
                 </div>
                 <div class="main-content">
-                    <div class="env-selector">
-                        <label>Environment:</label>
-                        <select onchange="setEnvironment(this.value)">
-                            <option value="">No Environment</option>
-                            \${state.environments.map(env => \`<option value="\${env.id}" \${env.isActive ? 'selected' : ''}>\${env.name}</option>\`).join('')}
-                        </select>
-                    </div>
                     <div class="request-builder">
                         <div class="url-bar">
                             <select class="method-select" onchange="setMethod(this.value)">
@@ -486,7 +486,7 @@ export class ApiTesterPanel {
         }
 
         function renderTabContent() {
-            if (state.activeTab === 'params') return renderKeyValueEditor('params', parseQueryParams(state.url));
+            if (state.activeTab === 'params') return renderKeyValueEditor('params', state.queryParams);
             if (state.activeTab === 'headers') return renderKeyValueEditor('headers', state.headers);
             if (state.activeTab === 'body') {
                 return \`<div style="margin-bottom:12px"><div class="tabs">\${['none','json','form','text','xml'].map(t => \`<button class="tab \${state.bodyType === t ? 'active' : ''}" onclick="setBodyType('\${t}')">\${t.charAt(0).toUpperCase()+t.slice(1)}</button>\`).join('')}</div></div>\${state.bodyType !== 'none' ? \`<textarea class="body-editor" placeholder="\${getBodyPlaceholder()}" oninput="setBody(this.value)">\${escapeHtml(state.body)}</textarea>\` : '<p style="color:var(--text-muted);font-size:12px">No body</p>'}\`;
@@ -535,26 +535,42 @@ export class ApiTesterPanel {
         function setAuthField(f,v){state.auth[f]=v;}
         function setEnvironment(id){vscode.postMessage({type:'setActiveEnvironment',id});}
 
-        function updateKeyValue(type,i,field,value){if(type==='headers'){state.headers[i][field]=value;}else{const p=parseQueryParams(state.url);p[i][field]=value;updateUrlParams(p);}}
+        function updateKeyValue(type,i,field,value){
+            if(type==='headers'){
+                state.headers[i][field]=value;
+            }else{
+                state.queryParams[i][field]=value;
+                updateUrlWithParams();
+            }
+        }
         function addKeyValue(type){
             console.log('[Webview] Add button clicked for:', type);
             if(type==='headers'){
                 state.headers.push({key:'',value:''});
                 console.log('[Webview] Added header row, total:', state.headers.length);
             }else{
-                const p=parseQueryParams(state.url);
-                p.push({key:'',value:''});
-                console.log('[Webview] Adding param row, total:', p.length);
-                updateUrlParams(p);
+                state.queryParams.push({key:'',value:''});
+                console.log('[Webview] Adding param row, total:', state.queryParams.length);
             }
             render();
         }
-        function removeKeyValue(type,i){if(type==='headers'){state.headers.splice(i,1);if(!state.headers.length)state.headers.push({key:'',value:''});}else{const p=parseQueryParams(state.url);p.splice(i,1);if(!p.length)p.push({key:'',value:''});updateUrlParams(p);}render();}
-        function updateUrlParams(params){
+        function removeKeyValue(type,i){
+            if(type==='headers'){
+                state.headers.splice(i,1);
+                if(!state.headers.length)state.headers.push({key:'',value:''});
+            }else{
+                state.queryParams.splice(i,1);
+                if(!state.queryParams.length)state.queryParams.push({key:'',value:''});
+                updateUrlWithParams();
+            }
+            render();
+        }
+        function updateUrlWithParams(){
+            if(!state.url)return;
             try{
                 const u=new URL(state.url);
                 u.search='';
-                params.forEach(p=>{if(p.key)u.searchParams.append(p.key,p.value);});
+                state.queryParams.forEach(p=>{if(p.key)u.searchParams.append(p.key,p.value);});
                 state.url=u.toString();
             }catch(e){
                 console.log('[Webview] Cannot update URL params - invalid URL:', state.url);
@@ -567,6 +583,7 @@ export class ApiTesterPanel {
             state.method='GET';
             state.url='';
             state.headers=[{key:'',value:''}];
+            state.queryParams=[{key:'',value:''}];
             state.body='';
             state.bodyType='json';
             state.auth={type:'none'};
@@ -587,6 +604,17 @@ export class ApiTesterPanel {
                 state.url=r.url;
                 state.headers=Object.entries(r.headers||{}).map(([k,v])=>({key:k,value:v}));
                 if(!state.headers.length)state.headers.push({key:'',value:''});
+
+                // Parse query params from URL
+                try{
+                    const u=new URL(r.url);
+                    const p=[];
+                    u.searchParams.forEach((v,k)=>p.push({key:k,value:v}));
+                    state.queryParams=p.length?p:[{key:'',value:''}];
+                }catch{
+                    state.queryParams=[{key:'',value:''}];
+                }
+
                 state.body=r.body||'';
                 state.bodyType=r.bodyType||'json';
                 state.auth=r.auth||{type:'none'};
@@ -601,6 +629,9 @@ export class ApiTesterPanel {
             console.log('[Webview] Save button clicked');
             console.log('[Webview] Current state.response:', state.response);
 
+            // Update URL with params before saving
+            updateUrlWithParams();
+
             // Generate default name from method and URL
             let defaultName = state.method + ' ' + (state.url || 'Request');
             try {
@@ -614,14 +645,30 @@ export class ApiTesterPanel {
             state.headers.forEach(x=>{if(x.key)h[x.key]=x.value;});
 
             // Only include response if it exists and is not an error
-            const responseToSave = (state.response && !state.response.error) ? {
-                status: state.response.status,
-                statusText: state.response.statusText,
-                headers: state.response.headers,
-                body: state.response.body,
-                time: state.response.time,
-                size: state.response.size
-            } : undefined;
+            let responseToSave = undefined;
+            if (state.response) {
+                console.log('[Webview] state.response exists');
+                console.log('[Webview] state.response.error?', state.response.error);
+                console.log('[Webview] state.response.status?', state.response.status);
+
+                if (!state.response.error && state.response.status) {
+                    responseToSave = {
+                        status: state.response.status,
+                        statusText: state.response.statusText,
+                        headers: state.response.headers,
+                        body: state.response.body,
+                        time: state.response.time,
+                        size: state.response.size
+                    };
+                    console.log('[Webview] Created responseToSave object:', responseToSave);
+                } else {
+                    console.log('[Webview] NOT saving response - error or no status');
+                }
+            } else {
+                console.log('[Webview] state.response is null/undefined - no response to save');
+            }
+
+            console.log('[Webview] Final responseToSave:', responseToSave);
 
             const payload = {
                 type:'saveRequest',
@@ -634,8 +681,7 @@ export class ApiTesterPanel {
                 auth:state.auth,
                 response:responseToSave
             };
-            console.log('[Webview] Response to save:', responseToSave);
-            console.log('[Webview] Full payload:', payload);
+            console.log('[Webview] Full payload with response:', JSON.stringify(payload).substring(0, 200));
             vscode.postMessage(payload);
         }
         function deleteRequest(id){vscode.postMessage({type:'deleteRequest',id});}
@@ -673,7 +719,33 @@ export class ApiTesterPanel {
             }
         });
 
-        console.log('[Webview] Initializing - Version 1.0.3');
+        // Make functions globally available for onclick handlers
+        window.addKeyValue = addKeyValue;
+        window.removeKeyValue = removeKeyValue;
+        window.updateKeyValue = updateKeyValue;
+        window.newRequest = newRequest;
+        window.saveCurrentRequest = saveCurrentRequest;
+        window.sendRequest = sendRequest;
+        window.discoverEndpoints = discoverEndpoints;
+        window.loadSavedRequest = loadSavedRequest;
+        window.loadFromHistory = loadFromHistory;
+        window.loadEndpoint = loadEndpoint;
+        window.deleteRequest = deleteRequest;
+        window.clearHistory = clearHistory;
+        window.createEnvironment = createEnvironment;
+        window.setMethod = setMethod;
+        window.setUrl = setUrl;
+        window.setActiveTab = setActiveTab;
+        window.setResponseTab = setResponseTab;
+        window.setSidebarTab = setSidebarTab;
+        window.setBodyType = setBodyType;
+        window.setBody = setBody;
+        window.setAuthType = setAuthType;
+        window.setAuthField = setAuthField;
+        window.setEnvironment = setEnvironment;
+
+        console.log('[Webview] Initializing - Version 1.0.4');
+        console.log('[Webview] addKeyValue function exists:', typeof window.addKeyValue);
         render();
         vscode.postMessage({type:'getEnvironments'});
         vscode.postMessage({type:'getSavedRequests'});

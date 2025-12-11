@@ -74,18 +74,38 @@ export class RequestHistory {
     async saveRequest(request: Omit<SavedRequest, 'id' | 'createdAt' | 'updatedAt'>): Promise<SavedRequest> {
         const requests = await this.getSavedRequests();
         const now = Date.now();
-        
-        const newRequest: SavedRequest = {
-            ...request,
-            id: this.generateId(),
-            createdAt: now,
-            updatedAt: now,
-        };
 
-        requests.push(newRequest);
-        await this.context.globalState.update(STORAGE_KEYS.REQUESTS, requests);
-        
-        return newRequest;
+        // Check if request with same method and URL already exists
+        const existingIndex = requests.findIndex(r =>
+            r.method === request.method && r.url === request.url
+        );
+
+        if (existingIndex !== -1) {
+            // Update existing request
+            const existing = requests[existingIndex];
+            requests[existingIndex] = {
+                ...existing,
+                ...request,
+                id: existing.id, // Keep the same ID
+                createdAt: existing.createdAt, // Keep original creation time
+                updatedAt: now,
+            };
+            await this.context.globalState.update(STORAGE_KEYS.REQUESTS, requests);
+            return requests[existingIndex];
+        } else {
+            // Create new request
+            const newRequest: SavedRequest = {
+                ...request,
+                id: this.generateId(),
+                createdAt: now,
+                updatedAt: now,
+            };
+
+            requests.push(newRequest);
+            await this.context.globalState.update(STORAGE_KEYS.REQUESTS, requests);
+
+            return newRequest;
+        }
     }
 
     async updateRequest(id: string, updates: Partial<SavedRequest>): Promise<SavedRequest | null> {
